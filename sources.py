@@ -12,6 +12,7 @@ import ssl
 import sys
 import time
 import urllib.request
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
@@ -24,10 +25,20 @@ except ImportError:
 RAW = "https://raw.githubusercontent.com"
 
 
-def fetch(url, as_json=True):
-    req = urllib.request.Request(url, headers={"User-Agent": "kite"})
+_cache = {}
+
+
+def fetch(url, as_json=True, data=None):
+    # the big listing feeds are read twice per run (jobs + board discovery)
+    if data is None and (url, as_json) in _cache:
+        return _cache[url, as_json]
+    req = urllib.request.Request(url, data=json.dumps(data).encode() if data else None, headers={
+        "User-Agent": "kite", "Accept": "application/json", "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=30, context=CTX) as r:
-        return json.load(r) if as_json else r.read().decode()
+        out = json.load(r) if as_json else r.read().decode()
+    if data is None:
+        _cache[url, as_json] = out
+    return out
 
 
 def listings_json(repo, kind):
@@ -79,7 +90,8 @@ def speedyapply(path, kind):
 
 
 # Company job boards, read straight from the ATS so roles show up before the
-# lists above pick them up. Name -> (ats, board slug).
+# lists above pick them up. These are always checked; every other board that
+# shows up in the lists gets found by discover_boards(). Name -> (ats, slug).
 BOARDS = {
     "Stripe": ("greenhouse", "stripe"), "Airbnb": ("greenhouse", "airbnb"),
     "Figma": ("greenhouse", "figma"), "Databricks": ("greenhouse", "databricks"),
@@ -116,12 +128,78 @@ BOARDS = {
     "Sierra": ("ashby", "sierra"), "Modal": ("ashby", "modal"),
     "ElevenLabs": ("ashby", "elevenlabs"), "Cursor": ("ashby", "cursor"),
     "Snowflake": ("ashby", "snowflake"),
+    "Disney": ("workday", "disney/wd5/disneycareer"),
+    "NVIDIA": ("workday", "nvidia/wd5/NVIDIAExternalCareerSite"),
+    "Salesforce": ("workday", "salesforce/wd12/External_Career_Site"),
+    "Netflix": ("workday", "netflix/wd108/netflix"),
+    "Capital One": ("workday", "capitalone/wd12/Capital_One"),
 }
+
+# Where the lists' apply links point, so kite can read those boards directly.
+DISCOVER_FROM = [
+    f"{RAW}/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
+    f"{RAW}/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json",
+]
+ATS_LINKS = [
+    ("workday", re.compile(r"https?://([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[a-z]{2}/)?([a-z0-9_-]+)/", re.I)),
+    ("greenhouse", re.compile(r"//(?:job-)?boards\.greenhouse\.io/([a-z0-9-]+)/jobs", re.I)),
+    ("lever", re.compile(r"//jobs\.lever\.co/([a-z0-9.-]+)/", re.I)),
+    ("ashby", re.compile(r"//jobs\.ashbyhq\.com/([a-z0-9.-]+)/", re.I)),
+]
+SKIP_SITES = re.compile(r"private|confidential|internal|staff|executive", re.I)
 INTERN = re.compile(r"\bintern(ship)?\b|co-?op\b", re.I)
 NEWGRAD = re.compile(r"new (college )?grad|university grad|recent grad|early career|entry[- ]level|\b202[67] grad", re.I)
 # boards list every role at the company; keep the ones a CS student would want
 TECH = re.compile(r"software|engineer|developer|\bswe\b|data|machine learning|\bml\b|\bai\b|research|"
                   r"quant|security|infrastructure|platform|product manag|technical|computer|robotics", re.I)
+
+
+def discover_boards():
+    found = {}
+    for url in DISCOVER_FROM:
+        for j in fetch(url):
+            for ats, rx in ATS_LINKS:
+                m = rx.search(j.get("url", ""))
+                if m:
+                    slug = "/".join(m.groups()) if ats == "workday" else m.group(1).lower()
+                    found.setdefault((ats, slug), Counter())[j["company_name"]] += 1
+    boards = {}
+    for (ats, slug), names in found.items():
+        # workday boards cost several requests each, so skip one-off and private sites
+        if ats == "workday" and (sum(names.values()) < 2 or SKIP_SITES.search(slug)):
+            continue
+        boards[ats, slug] = names.most_common(1)[0][0]
+    for name, key in BOARDS.items():
+        boards[key] = name
+    return boards
+
+
+def days_ago(posted_on):
+    s = posted_on.lower()
+    if "today" in s:
+        return 0
+    if "yesterday" in s:
+        return 1
+    m = re.search(r"(\d+)\+? days? ago", s)
+    return int(m.group(1)) if m and "+" not in s else None
+
+
+def workday(slug):
+    tenant, wd, site = slug.split("/")
+    base = f"https://{tenant}.{wd}.myworkdayjobs.com"
+    rows, now = [], time.time()
+    for query, pages in (("intern", 3), ("new grad", 1)):
+        for page in range(pages):
+            posts = fetch(f"{base}/wday/cxs/{tenant}/{site}/jobs", data={
+                "appliedFacets": {}, "limit": 20, "offset": page * 20, "searchText": query}).get("jobPostings", [])
+            for j in posts:
+                age = days_ago(j.get("postedOn", ""))
+                if age is not None and "externalPath" in j:
+                    rows.append((j["title"], f"{base}/en-US/{site}{j['externalPath']}",
+                                 [j.get("locationsText", "")], now - age * 86400))
+            if len(posts) < 20:
+                break
+    return rows
 
 
 def iso(s):
@@ -136,6 +214,8 @@ def board(company, ats, slug):
     elif ats == "lever":
         rows = [(j["text"], j["hostedUrl"], j["categories"].get("allLocations") or [j["categories"].get("location", "")],
                  j["createdAt"] / 1000) for j in fetch(f"https://api.lever.co/v0/postings/{slug}?mode=json")]
+    elif ats == "workday":
+        rows = workday(slug)
     else:
         rows = [(j["title"], j["jobUrl"], [j["location"]] + [l["location"] for l in j.get("secondaryLocations", [])],
                  iso(j["publishedAt"])) for j in fetch(f"https://api.ashbyhq.com/posting-api/job-board/{slug}")["jobs"]
@@ -151,14 +231,20 @@ def board(company, ats, slug):
 
 
 def company_boards():
+    boards = discover_boards()
+    failed = []
+
     def one(item):
+        (ats, slug), company = item
         try:
-            return board(item[0], *item[1])
-        except Exception as e:  # one dead board shouldn't sink the rest
-            print(f"warning: {item[0]} board failed: {e}", file=sys.stderr)
+            return board(company, ats, slug)
+        except Exception:  # one dead board shouldn't sink the rest
+            failed.append(company)
             return []
-    with ThreadPoolExecutor(16) as ex:
-        return [j for jobs in ex.map(one, BOARDS.items()) for j in jobs]
+    with ThreadPoolExecutor(32) as ex:
+        jobs = [j for found in ex.map(one, boards.items()) for j in found]
+    print(f"read {len(boards) - len(failed)} of {len(boards)} company job boards", file=sys.stderr)
+    return jobs
 
 
 SOURCES = {

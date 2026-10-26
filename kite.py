@@ -21,7 +21,7 @@ from sources import CTX, SOURCES
 
 STATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seen.json")
 MAX_AGE = 3 * 86400       # never post anything older than 3 days
-MAX_PER_MESSAGE = 25      # Slack caps a message at 50 blocks
+MAX_PER_MESSAGE = 45      # Slack caps a message at 50 blocks
 KEEP_SEEN = 30 * 86400    # forget keys after 30 days so seen.json stays small
 BLOCKED = {"astrolab"}    # companies never to post, lowercase with no spaces
 KINDS = {"intern": "new internship", "newgrad": "new grad role"}
@@ -101,7 +101,7 @@ def message(jobs, kind):
     for j in jobs:
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": line(j)}})
     blocks.append({"type": "context", "elements": [{"type": "mrkdwn",
-                   "text": "Posted in the last 3 days, from Simplify, vanshb03 and speedyapply. Apply early 🫶"}]})
+                   "text": "Posted in the last 3 days, from company job boards and the Simplify, vanshb03 and speedyapply lists. Apply early 🫶"}]})
     return {"text": title, "blocks": blocks, "unfurl_links": False}
 
 
