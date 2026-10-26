@@ -2,7 +2,7 @@
 
 A Slack bot that posts new internship and new grad roles to a single channel (built for ColorStack's `#opportunities`).
 
-Every 30 minutes it checks the job boards of about 75 companies directly (Greenhouse, Lever and Ashby), so new roles show up before the lists add them. It also pulls the Summer 2027 internship and new grad lists from [Simplify](https://github.com/SimplifyJobs/Summer2027-Internships), [vanshb03](https://github.com/vanshb03/Summer2027-Internships) and [speedyapply](https://github.com/speedyapply/2027-SWE-College-Jobs). It skips anything posted more than 3 days ago or already sent (the same role on two lists only goes out once), and posts what is left: one message for internships and one for new grad roles.
+Every 30 minutes it checks about 3,000 company job boards directly (Workday, Greenhouse, Lever and Ashby): every company whose roles show up in the lists, plus a hand-picked set in `BOARDS`, so new roles show up before the lists add them. It also pulls the Summer 2027 internship and new grad lists from [Simplify](https://github.com/SimplifyJobs/Summer2027-Internships), [vanshb03](https://github.com/vanshb03/Summer2027-Internships) and [speedyapply](https://github.com/speedyapply/2027-SWE-College-Jobs). It skips anything posted more than 3 days ago or already sent (the same role on two lists only goes out once), and posts what is left: one message for internships and one for new grad roles.
 
 It posts through a Slack **incoming webhook**, and a webhook is tied to one channel when it's created. That means the bot can't read messages, DM anyone or post in other channels.
 
