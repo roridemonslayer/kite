@@ -10,6 +10,7 @@ anywhere else.
     python kite.py             # post new roles (needs SLACK_WEBHOOK_URL)
 """
 import argparse
+import datetime
 import json
 import os
 import re
@@ -20,7 +21,7 @@ import urllib.request
 from sources import CTX, SOURCES
 
 STATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seen.json")
-MAX_AGE = 3 * 86400       # never post anything older than 3 days
+MAX_DAYS = 3              # post roles from today and the 3 days before, nothing older
 MAX_PER_MESSAGE = 45      # Slack caps a message at 50 blocks
 KEEP_SEEN = 30 * 86400    # forget keys after 30 days so seen.json stays small
 BLOCKED = {"astrolab"}    # companies never to post, lowercase with no spaces
@@ -47,7 +48,11 @@ def keys(job):
 
 
 def load_jobs():
-    jobs, now, ok = [], time.time(), 0
+    jobs, ok = [], 0
+    # count by calendar day: many sites only give a date, so "posted Oct 23"
+    # should still count on Oct 26
+    today = datetime.date.today()
+    cutoff = time.mktime((today - datetime.timedelta(days=MAX_DAYS)).timetuple())
     for name, load in SOURCES.items():
         try:
             found = load()
@@ -55,7 +60,7 @@ def load_jobs():
         except Exception as e:
             print(f"warning: {name} failed: {e}", file=sys.stderr)
             continue
-        jobs += [j for j in found if now - j["posted"] <= MAX_AGE and norm(j["company"]) not in BLOCKED]
+        jobs += [j for j in found if j["posted"] >= cutoff and norm(j["company"]) not in BLOCKED]
     if not ok:
         # saving an empty seen.json here would make the next run repost everything
         sys.exit("every source failed; leaving seen.json alone")

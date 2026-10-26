@@ -11,6 +11,7 @@ import re
 import ssl
 import sys
 import time
+import urllib.parse
 import urllib.request
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -171,6 +172,8 @@ def discover_boards():
         boards[ats, slug] = names.most_common(1)[0][0]
     for name, key in BOARDS.items():
         boards[key] = name
+    for name, root in CAREER_SITES.items():
+        boards["careersite", root] = name
     return boards
 
 
@@ -202,6 +205,28 @@ def workday(slug):
     return rows
 
 
+# Careers sites some big companies run themselves instead of a plain ATS page
+# (Radancy "TalentBrew" sites). Name -> site root.
+CAREER_SITES = {"Disney": "https://www.disneycareers.com"}
+CAREER_SITE_QUERIES = ["software engineering intern", "technology intern", "data intern",
+                       "engineering intern", "machine learning intern", "new grad software engineer"]
+
+
+def career_site(company, root):
+    rows, seen_urls = [], set()
+    for q in CAREER_SITE_QUERIES:
+        page = fetch(f"{root}/en/search-jobs/{urllib.parse.quote(q)}", as_json=False)
+        for path, title, loc, date in re.findall(
+                r'<a href="(/en/job/[^"]+)"[^>]*>\s*<h2>([^<]+)</h2>.*?job-location">([^<]*)<.*?job-date-posted">([^<]+)<',
+                page, re.S):
+            if path in seen_urls:
+                continue
+            seen_urls.add(path)
+            posted = datetime.strptime(date.strip().replace(".", ""), "%b %d, %Y").timestamp()
+            rows.append((html.unescape(title), root + path, [" ".join(html.unescape(loc).split())], posted))
+    return rows
+
+
 def iso(s):
     return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
 
@@ -216,6 +241,8 @@ def board(company, ats, slug):
                  j["createdAt"] / 1000) for j in fetch(f"https://api.lever.co/v0/postings/{slug}?mode=json")]
     elif ats == "workday":
         rows = workday(slug)
+    elif ats == "careersite":
+        rows = career_site(company, slug)
     else:
         rows = [(j["title"], j["jobUrl"], [j["location"]] + [l["location"] for l in j.get("secondaryLocations", [])],
                  iso(j["publishedAt"])) for j in fetch(f"https://api.ashbyhq.com/posting-api/job-board/{slug}")["jobs"]
