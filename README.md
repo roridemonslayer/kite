@@ -1,8 +1,8 @@
 # kite
 
-A Slack bot that posts new internship listings to a single channel (built for ColorStack's `#opportunities`).
+A Slack bot that posts new internship and new grad roles to a single channel (built for ColorStack's `#opportunities`).
 
-Every 20 minutes it pulls the [Simplify](https://github.com/SimplifyJobs/Summer2027-Internships) and [vanshb03](https://github.com/vanshb03/Summer2027-Internships) Summer 2027 lists, drops anything it has already posted, and sends the new roles as one message.
+Every 20 minutes it pulls the Summer 2027 internship and new grad lists from [Simplify](https://github.com/SimplifyJobs/Summer2027-Internships), [vanshb03](https://github.com/vanshb03/Summer2027-Internships) and [speedyapply](https://github.com/speedyapply/2027-SWE-College-Jobs). It skips anything posted more than 3 days ago or already sent (the same role on two lists only goes out once), then posts what is left: one message for internships and one for new grad roles.
 
 It posts through a Slack **incoming webhook**, and a webhook is tied to one channel when it's created. That means the bot can't read messages, DM anyone or post in other channels.
 

@@ -1,9 +1,9 @@
-"""kite: posts new internship listings to one Slack channel.
+"""kite: posts new internship and new grad roles to one Slack channel.
 
-Pulls the Simplify and vanshb03 Summer 2027 listing feeds, keeps the roles it
-hasn't seen before, and posts them as a single message through a Slack
-incoming webhook. A webhook is bound to exactly one channel, so the bot can
-never post anywhere else.
+Pulls several job lists (see sources.py), keeps roles posted in the last 3
+days that it hasn't seen before, and posts them through a Slack incoming
+webhook. A webhook is bound to exactly one channel, so the bot can never post
+anywhere else.
 
     python kite.py --seed      # first run: remember everything, post nothing
     python kite.py --dry-run   # print what would be posted
@@ -13,57 +13,45 @@ import argparse
 import json
 import os
 import re
-import ssl
 import sys
 import time
 import urllib.request
 
-try:  # macOS python.org builds ship without a CA bundle
-    import certifi
-    CTX = ssl.create_default_context(cafile=certifi.where())
-except ImportError:
-    CTX = ssl.create_default_context()
+from sources import CTX, SOURCES
 
-FEEDS = {
-    "Simplify": "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
-    "vanshb03": "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/.github/scripts/listings.json",
-}
 STATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seen.json")
-MAX_AGE = 3 * 86400       # ignore anything posted more than 3 days ago
+MAX_AGE = 3 * 86400       # never post anything older than 3 days
 MAX_PER_MESSAGE = 25      # Slack caps a message at 50 blocks
 KEEP_SEEN = 30 * 86400    # forget keys after 30 days so seen.json stays small
+KINDS = {"intern": "new internship", "newgrad": "new grad role"}
 
 
-def fetch(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "kite"})
-    with urllib.request.urlopen(req, timeout=30, context=CTX) as r:
-        return json.load(r)
+def norm(s):
+    s = (s or "").lower()
+    # lists word the same role differently ("SWE Intern - Summer 2027 - USA")
+    s = re.sub(r"\b((summer|fall|spring|winter)\s*)?20\d\d\b|\b(usa|us|united states)\b", "", s)
+    return re.sub(r"[^a-z0-9]", "", s)
 
 
-def key(job):
-    # the same role often shows up in both feeds, so dedupe on company + title
-    norm = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").lower())
-    return norm(job["company_name"]) + "|" + norm(job["title"])
+def keys(job):
+    # a role counts as seen if either its company + title or its link was seen
+    url = re.sub(r"^https?://(www\.)?", "", job["url"].split("?")[0]).rstrip("/").lower()
+    return [norm(job["company"]) + "|" + norm(job["title"]), url]
 
 
 def load_jobs():
-    jobs, now, ok = {}, time.time(), 0
-    for name, url in FEEDS.items():
+    jobs, now, ok = [], time.time(), 0
+    for name, load in SOURCES.items():
         try:
-            feed = fetch(url)
+            found = load()
             ok += 1
         except Exception as e:
-            print(f"warning: {name} feed failed: {e}", file=sys.stderr)
+            print(f"warning: {name} failed: {e}", file=sys.stderr)
             continue
-        for j in feed:
-            if not j.get("active", True) or not j.get("is_visible", True):
-                continue
-            if now - j.get("date_posted", 0) > MAX_AGE:
-                continue
-            jobs.setdefault(key(j), j)
+        jobs += [j for j in found if now - j["posted"] <= MAX_AGE]
     if not ok:
         # saving an empty seen.json here would make the next run repost everything
-        sys.exit("every feed failed; leaving seen.json alone")
+        sys.exit("every source failed; leaving seen.json alone")
     return jobs
 
 
@@ -89,7 +77,7 @@ def esc(s):
 def line(j):
     locs = j.get("locations") or []
     where = locs[0] + (f" +{len(locs) - 1}" if len(locs) > 1 else "") if locs else ""
-    bits = [f"*{esc(j['company_name'])}*  <{j['url']}|{esc(j['title'])}>"]
+    bits = [f"*{esc(j['company'])}*  <{j['url']}|{esc(j['title'])}>"]
     if where:
         bits.append(esc(where))
     if j.get("sponsorship") == "Does Not Offer Sponsorship":
@@ -99,15 +87,15 @@ def line(j):
     return "  ·  ".join(bits)
 
 
-def message(jobs):
-    n = len(jobs)
-    blocks = [{"type": "header", "text": {"type": "plain_text",
-               "text": f"🪁 {n} new internship{'s' if n != 1 else ''}"}}]
+def message(jobs, kind):
+    n, label = len(jobs), KINDS[kind]
+    title = f"🪁 {n} {label}{'s' if n != 1 else ''}"
+    blocks = [{"type": "header", "text": {"type": "plain_text", "text": title}}]
     for j in jobs:
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": line(j)}})
     blocks.append({"type": "context", "elements": [{"type": "mrkdwn",
-                   "text": "From the Simplify + vanshb03 Summer 2027 lists. Apply early 🫶"}]})
-    return {"text": f"{n} new internships", "blocks": blocks, "unfurl_links": False}
+                   "text": "Posted in the last 3 days, from Simplify, vanshb03 and speedyapply. Apply early 🫶"}]})
+    return {"text": title, "blocks": blocks, "unfurl_links": False}
 
 
 def post(payload):
@@ -131,23 +119,29 @@ def main():
         sys.exit("no seen.json yet; run with --seed first so the channel isn't flooded")
     seen = seen or {}
 
-    new = [j for k, j in jobs.items() if k not in seen]
-    new.sort(key=lambda j: j.get("date_posted", 0))
-    print(f"{len(jobs)} recent roles, {len(new)} new")
+    new, taken = [], set()
+    for j in sorted(jobs, key=lambda j: j["posted"]):
+        ks = keys(j)
+        if not any(k in seen or k in taken for k in ks):
+            new.append(j)
+        taken.update(ks)
+    print(f"{len(jobs)} recent listings, {len(new)} new")
 
-    if not args.seed and new:
-        for i in range(0, len(new), MAX_PER_MESSAGE):
-            payload = message(new[i:i + MAX_PER_MESSAGE])
-            if args.dry_run:
-                print("\n".join(line(j) for j in new[i:i + MAX_PER_MESSAGE]))
-            else:
-                post(payload)
+    if not args.seed:
+        for kind in KINDS:
+            batch = [j for j in new if j["kind"] == kind]
+            for i in range(0, len(batch), MAX_PER_MESSAGE):
+                chunk = batch[i:i + MAX_PER_MESSAGE]
+                if args.dry_run:
+                    print(f"\n== {message(chunk, kind)['text']}")
+                    print("\n".join(line(j) for j in chunk))
+                else:
+                    post(message(chunk, kind))
 
     if not args.dry_run:
-        for k in jobs:
+        for k in taken:
             seen.setdefault(k, now)
         save_seen(seen)
-
 
 if __name__ == "__main__":
     main()
