@@ -1,0 +1,31 @@
+name: post new internships
+
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: kite
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python kite.py
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: save seen.json
+        run: |
+          git config user.name roridemonslayer
+          git config user.email roridemonslayer@users.noreply.github.com
+          git add seen.json
+          git diff --cached --quiet || (git commit -m "update seen roles" && git push)
