@@ -2,7 +2,7 @@
 
 A Slack bot that posts new internship and new grad roles to a single channel (built for ColorStack's `#opportunities`).
 
-Every 20 minutes it pulls the Summer 2027 internship and new grad lists from [Simplify](https://github.com/SimplifyJobs/Summer2027-Internships), [vanshb03](https://github.com/vanshb03/Summer2027-Internships) and [speedyapply](https://github.com/speedyapply/2027-SWE-College-Jobs). It skips anything posted more than 3 days ago or already sent (the same role on two lists only goes out once), then posts what is left: one message for internships and one for new grad roles.
+Every 20 minutes it checks the job boards of about 75 companies directly (Greenhouse, Lever and Ashby), so new roles show up before the lists add them. It also pulls the Summer 2027 internship and new grad lists from [Simplify](https://github.com/SimplifyJobs/Summer2027-Internships), [vanshb03](https://github.com/vanshb03/Summer2027-Internships) and [speedyapply](https://github.com/speedyapply/2027-SWE-College-Jobs). It skips anything posted more than 3 days ago or already sent (the same role on two lists only goes out once), and posts what is left: one message for internships and one for new grad roles.
 
 It posts through a Slack **incoming webhook**, and a webhook is tied to one channel when it's created. That means the bot can't read messages, DM anyone or post in other channels.
 
@@ -22,3 +22,5 @@ SLACK_WEBHOOK_URL=... python3 kite.py
 ```
 
 `seen.json` tracks what has already been posted. The workflow commits it back after each run.
+
+To add a company, put its board in `BOARDS` in `sources.py`. The slug is the part of its job board URL after `greenhouse.io/`, `jobs.lever.co/` or `jobs.ashbyhq.com/`.
