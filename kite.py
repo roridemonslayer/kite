@@ -35,7 +35,13 @@ def norm(s):
 
 def keys(job):
     # a role counts as seen if either its company + title or its link was seen
-    url = re.sub(r"^https?://(www\.)?", "", job["url"].split("?")[0]).rstrip("/").lower()
+    url = job["url"].lower()
+    gh = re.search(r"gh_jid=(\d+)|greenhouse\.io/[^/]+/jobs/(\d+)", url)
+    if gh:  # one greenhouse job shows up under many different links
+        url = "greenhouse:" + (gh.group(1) or gh.group(2))
+    else:
+        url = re.sub(r"[?&](utm_[a-z]+|source|ref|embed)=[^&]*", "", url)
+        url = re.sub(r"^https?://(www\.)?", "", url).rstrip("/?")
     return [norm(job["company"]) + "|" + norm(job["title"]), url]
 
 
