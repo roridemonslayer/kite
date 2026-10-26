@@ -23,6 +23,7 @@ STATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seen.json")
 MAX_AGE = 3 * 86400       # never post anything older than 3 days
 MAX_PER_MESSAGE = 25      # Slack caps a message at 50 blocks
 KEEP_SEEN = 30 * 86400    # forget keys after 30 days so seen.json stays small
+BLOCKED = {"astrolab"}    # companies never to post, lowercase with no spaces
 KINDS = {"intern": "new internship", "newgrad": "new grad role"}
 
 
@@ -54,7 +55,7 @@ def load_jobs():
         except Exception as e:
             print(f"warning: {name} failed: {e}", file=sys.stderr)
             continue
-        jobs += [j for j in found if now - j["posted"] <= MAX_AGE]
+        jobs += [j for j in found if now - j["posted"] <= MAX_AGE and norm(j["company"]) not in BLOCKED]
     if not ok:
         # saving an empty seen.json here would make the next run repost everything
         sys.exit("every source failed; leaving seen.json alone")
