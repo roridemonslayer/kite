@@ -134,6 +134,12 @@ def main():
         taken.update(ks)
     print(f"{len(jobs)} recent listings, {len(new)} new")
 
+    if not args.seed and not args.dry_run and not os.environ.get("SLACK_WEBHOOK_URL"):
+        # no channel hooked up yet: keep seen.json current so the first real
+        # post isn't a backlog of everything since the repo went up
+        print("no SLACK_WEBHOOK_URL set; marking roles seen without posting")
+        args.seed = True
+
     if not args.seed:
         for kind in KINDS:
             batch = [j for j in new if j["kind"] == kind]
