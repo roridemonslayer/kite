@@ -1,0 +1,24 @@
+{
+  "display_information": {
+    "name": "kite",
+    "description": "Posts new internship and new grad roles every 30 minutes.",
+    "long_description": "kite checks the Simplify, vanshb03 and speedyapply Summer 2027 lists plus about 75 company job boards (Greenhouse, Lever, Ashby) every 30 minutes, and posts roles from the last 3 days that it hasn't posted before. It uses one incoming webhook, so it can only post in the single channel it was installed to. It cannot read messages, DM anyone or post anywhere else. Code: https://github.com/roridemonslayer/kite",
+    "background_color": "#1d3b2a"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "kite",
+      "always_online": false
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": ["incoming-webhook"]
+    }
+  },
+  "settings": {
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}

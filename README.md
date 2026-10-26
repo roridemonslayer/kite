@@ -8,9 +8,9 @@ It posts through a Slack **incoming webhook**, and a webhook is tied to one chan
 
 ## Setup
 
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App**, then **From scratch**. Pick the workspace.
-2. Under **Incoming Webhooks**, turn the feature on and click **Add New Webhook to Workspace**. Choose the channel. In a workspace you don't admin, this sends an approval request to the admins.
-3. Copy the webhook URL. In this repo, go to **Settings → Secrets and variables → Actions** and add it as `SLACK_WEBHOOK_URL`.
+1. Go to [api.slack.com/apps](https://api.slack.com/apps), click **Create New App**, then **From a manifest**. Pick the workspace and paste in [`slack-manifest.json`](slack-manifest.json). That sets up the name, description and the single permission kite needs.
+2. Click **Install to Workspace** and choose the channel to post in. In a workspace you don't admin, this sends an approval request to the admins.
+3. Under **Incoming Webhooks**, copy the webhook URL. In this repo, go to **Settings → Secrets and variables → Actions** and add it as `SLACK_WEBHOOK_URL`.
 4. The workflow in `.github/workflows/post.yml` runs every 30 minutes. To trigger a run by hand, use **Actions → post new internships → Run workflow**.
 
 ## Running locally
