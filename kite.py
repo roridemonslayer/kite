@@ -7,6 +7,7 @@ anywhere else.
 
     python kite.py --seed      # first run: remember everything, post nothing
     python kite.py --dry-run   # print what would be posted
+    python kite.py --browser   # show what would be posted as a page in the browser
     python kite.py             # post new roles (needs SLACK_WEBHOOK_URL)
 """
 import argparse
@@ -17,6 +18,7 @@ import re
 import sys
 import time
 import urllib.request
+import webbrowser
 
 from sources import CTX, SOURCES
 
@@ -35,6 +37,14 @@ def norm(s):
     return re.sub(r"[^a-z0-9]", "", s)
 
 
+def norm_company(s):
+    # lists name the same employer differently ("General Dynamics Mission
+    # Systems, Inc." vs "General Dynamics Mission Systems")
+    s = re.sub(r"\s+-\s+.*$", "", s or "")
+    s = re.sub(r"[,.]?\s+(inc|llc|l\.l\.c|ltd|corp|corporation|co|company|plc|lp)\.?$", "", s.strip(), flags=re.I)
+    return norm(s)
+
+
 def keys(job):
     # a role counts as seen if either its company + title or its link was seen
     url = job["url"].lower()
@@ -44,7 +54,7 @@ def keys(job):
     else:
         url = re.sub(r"[?&](utm_[a-z]+|source|ref|embed)=[^&]*", "", url)
         url = re.sub(r"^https?://(www\.)?", "", url).rstrip("/?")
-    return [norm(job["company"]) + "|" + norm(job["title"]), url]
+    return [norm_company(job["company"]) + "|" + norm(job["title"]), url]
 
 
 def load_jobs():
@@ -110,6 +120,36 @@ def message(jobs, kind):
     return {"text": title, "blocks": blocks, "unfurl_links": False}
 
 
+def page(batches):
+    # a local look at what the next run would post, laid out like the Slack messages
+    def item(j):
+        locs = j.get("locations") or []
+        where = locs[0] + (f" +{len(locs) - 1}" if len(locs) > 1 else "") if locs else ""
+        tags = "".join(f'<span class="tag">{t}</span>' for t, on in
+                       [("no sponsorship", j.get("sponsorship") == "Does Not Offer Sponsorship"),
+                        ("US citizens only", j.get("sponsorship") == "U.S. Citizenship is Required")] if on)
+        return (f'<li><b>{esc(j["company"])}</b> <a href="{esc(j["url"])}" target="_blank">{esc(j["title"])}</a>'
+                f'<span class="where">{esc(where)}</span>{tags}</li>')
+    msgs = "".join(f'<section><h2>{esc(message(chunk, kind)["text"])}</h2><ul>{"".join(item(j) for j in chunk)}</ul></section>'
+                   for kind, chunk in batches)
+    return f"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>kite preview</title>
+<style>
+body{{margin:0;background:#0d0d0d;color:#eee;font:15px/1.5 -apple-system,system-ui,sans-serif}}
+main{{max-width:860px;margin:0 auto;padding:32px 16px}}
+h1{{font-size:44px;margin:0;letter-spacing:-1px}} h1 span{{color:#c6f432}}
+p.sub{{color:#888;margin:4px 0 28px}}
+section{{background:#171717;border:1px solid #262626;border-radius:16px;padding:20px 22px;margin-bottom:20px}}
+h2{{margin:0 0 12px;font-size:20px}}
+ul{{list-style:none;margin:0;padding:0}} li{{padding:8px 0;border-top:1px solid #222}}
+a{{color:#c6f432;text-decoration:none}} a:hover{{text-decoration:underline}}
+.where{{color:#888;margin-left:8px}} .where:empty{{display:none}}
+.tag{{font-size:12px;background:#2a2a2a;color:#ccc;border-radius:99px;padding:1px 8px;margin-left:8px}}
+</style><main><h1>kite <span>preview</span></h1>
+<p class="sub">What the next run would post · {datetime.datetime.now():%b %d, %I:%M %p} · nothing was posted or marked seen</p>
+{msgs or "<p>No new roles right now.</p>"}</main>"""
+
+
 def post(payload):
     req = urllib.request.Request(os.environ["SLACK_WEBHOOK_URL"],
                                  data=json.dumps(payload).encode(),
@@ -122,7 +162,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", action="store_true", help="mark current roles seen without posting")
     ap.add_argument("--dry-run", action="store_true", help="print instead of posting")
+    ap.add_argument("--browser", action="store_true", help="show what would be posted in the browser")
     args = ap.parse_args()
+    if args.browser:
+        args.dry_run = True
 
     jobs = load_jobs()
     seen = load_seen()
@@ -146,15 +189,24 @@ def main():
         args.seed = True
 
     if not args.seed:
+        batches = []
         for kind in KINDS:
             batch = [j for j in new if j["kind"] == kind]
             for i in range(0, len(batch), MAX_PER_MESSAGE):
                 chunk = batch[i:i + MAX_PER_MESSAGE]
-                if args.dry_run:
+                if args.browser:
+                    batches.append((kind, chunk))
+                elif args.dry_run:
                     print(f"\n== {message(chunk, kind)['text']}")
                     print("\n".join(line(j) for j in chunk))
                 else:
                     post(message(chunk, kind))
+        if args.browser:
+            out = os.path.join(os.path.dirname(STATE), "preview.html")
+            with open(out, "w") as f:
+                f.write(page(batches))
+            webbrowser.open("file://" + out)
+            print("opened", out)
 
     if not args.dry_run:
         for k in taken:
