@@ -1,4 +1,6 @@
 __pycache__/
 .DS_Store
-preview.html
+feed.json
+feed.html
+feed.log
 __pycache__/

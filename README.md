@@ -21,6 +21,20 @@ python3 kite.py --dry-run   # print what would be posted
 SLACK_WEBHOOK_URL=... python3 kite.py
 ```
 
+### Local feed (before Slack is hooked up)
+
+```sh
+python3 kite.py --feed --open   # add a section of new roles to feed.html and open it
+```
+
+Each run adds a section at the top with only the roles the feed hasn't shown yet; roles found again are listed underneath with when they first appeared. The page refreshes itself. To run it every 30 minutes on a Mac:
+
+```sh
+cp com.doublehole.kite.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/com.doublehole.kite.plist
+```
+
+The feed keeps its own `feed.json` and never touches `seen.json`.
+
 `seen.json` tracks what has already been posted. The workflow commits it back after each run.
 
 To add a company, put its board in `BOARDS` in `sources.py`. The slug is the part of its job board URL after `greenhouse.io/`, `jobs.lever.co/` or `jobs.ashbyhq.com/`.

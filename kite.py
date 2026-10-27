@@ -7,7 +7,7 @@ anywhere else.
 
     python kite.py --seed      # first run: remember everything, post nothing
     python kite.py --dry-run   # print what would be posted
-    python kite.py --browser   # show what would be posted as a page in the browser
+    python kite.py --feed      # add this run's new roles to feed.html (local stand-in for Slack)
     python kite.py             # post new roles (needs SLACK_WEBHOOK_URL)
 """
 import argparse
@@ -120,34 +120,94 @@ def message(jobs, kind):
     return {"text": title, "blocks": blocks, "unfurl_links": False}
 
 
-def page(batches):
-    # a local look at what the next run would post, laid out like the Slack messages
-    def item(j):
+FEED = os.path.join(os.path.dirname(STATE), "feed.json")
+FEED_PAGE = os.path.join(os.path.dirname(STATE), "feed.html")
+FEED_RUNS = 48            # keep a day of 30-minute runs on the page
+
+
+def update_feed(jobs):
+    # the local stand-in for the Slack channel until a webhook exists: each run
+    # adds a section with the roles it hasn't shown before, and lists the ones
+    # it found again with when they first showed up
+    try:
+        with open(FEED) as f:
+            feed = json.load(f)
+    except FileNotFoundError:
+        # start from what the GitHub runs already recorded (0 = never shown
+        # here) so the first section isn't three days of backlog
+        feed = {"shown": {k: 0 for k in load_seen() or {}}, "runs": []}
+    shown, now = feed["shown"], time.time()
+    new, again, taken = [], [], set()
+    for j in sorted(jobs, key=lambda j: j["posted"]):
+        ks = keys(j)
+        if any(k in taken for k in ks):
+            continue
+        first = min((shown[k] for k in ks if k in shown), default=None)
+        if first is None:
+            new.append(dict(j, first=None))
+        elif first:
+            again.append(dict(j, first=first))
+        taken.update(ks)
+    for k in taken:
+        shown.setdefault(k, now)
+    feed["runs"] = ([{"at": now, "new": new, "again": again}] + feed["runs"])[:FEED_RUNS]
+    with open(FEED, "w") as f:
+        json.dump(feed, f)
+    with open(FEED_PAGE, "w") as f:
+        f.write(feed_page(feed["runs"]))
+    return new, again
+
+
+def feed_page(runs):
+    def when(t, fmt="%b %d, %I:%M %p"):
+        return datetime.datetime.fromtimestamp(t).strftime(fmt).replace(" 0", " ")
+
+    def item(j, note=""):
         locs = j.get("locations") or []
         where = locs[0] + (f" +{len(locs) - 1}" if len(locs) > 1 else "") if locs else ""
-        tags = "".join(f'<span class="tag">{t}</span>' for t, on in
-                       [("no sponsorship", j.get("sponsorship") == "Does Not Offer Sponsorship"),
-                        ("US citizens only", j.get("sponsorship") == "U.S. Citizenship is Required")] if on)
+        tags = [t for t, on in [("no sponsorship", j.get("sponsorship") == "Does Not Offer Sponsorship"),
+                                ("US citizens only", j.get("sponsorship") == "U.S. Citizenship is Required")] if on]
+        tags = "".join(f'<span class="tag">{t}</span>' for t in tags + ([note] if note else []))
         return (f'<li><b>{esc(j["company"])}</b> <a href="{esc(j["url"])}" target="_blank">{esc(j["title"])}</a>'
                 f'<span class="where">{esc(where)}</span>{tags}</li>')
-    msgs = "".join(f'<section><h2>{esc(message(chunk, kind)["text"])}</h2><ul>{"".join(item(j) for j in chunk)}</ul></section>'
-                   for kind, chunk in batches)
+
+    def run(r, latest):
+        groups = ""
+        for kind in KINDS:
+            batch = [j for j in r["new"] if j["kind"] == kind]
+            if batch:
+                n = len(batch)
+                groups += f'<h3>🪁 {n} {KINDS[kind]}{"s" if n != 1 else ""}</h3><ul>{"".join(item(j) for j in batch)}</ul>'
+        if not groups:
+            groups = '<p class="none">Nothing new this time.</p>'
+        if r["again"]:
+            groups += (f'<details><summary>{len(r["again"])} found again, already shown before</summary><ul>'
+                       + "".join(item(j, "shown " + when(j["first"])) for j in r["again"]) + "</ul></details>")
+        badge = '<span class="live">latest</span>' if latest else ""
+        return f'<section><h2>{when(r["at"])}{badge}<span class="count">{len(r["new"])} new</span></h2>{groups}</section>'
+
+    body = "".join(run(r, i == 0) for i, r in enumerate(runs))
     return f"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>kite preview</title>
+<meta http-equiv="refresh" content="120"><title>kite feed</title>
 <style>
 body{{margin:0;background:#0d0d0d;color:#eee;font:15px/1.5 -apple-system,system-ui,sans-serif}}
 main{{max-width:860px;margin:0 auto;padding:32px 16px}}
 h1{{font-size:44px;margin:0;letter-spacing:-1px}} h1 span{{color:#c6f432}}
 p.sub{{color:#888;margin:4px 0 28px}}
 section{{background:#171717;border:1px solid #262626;border-radius:16px;padding:20px 22px;margin-bottom:20px}}
-h2{{margin:0 0 12px;font-size:20px}}
-ul{{list-style:none;margin:0;padding:0}} li{{padding:8px 0;border-top:1px solid #222}}
+h2{{margin:0 0 8px;font-size:22px;display:flex;align-items:center;gap:10px}}
+h3{{margin:16px 0 6px;font-size:16px;color:#ccc}}
+.count{{margin-left:auto;font-size:14px;color:#0d0d0d;background:#c6f432;border-radius:99px;padding:2px 10px}}
+.live{{font-size:12px;border:1px solid #c6f432;color:#c6f432;border-radius:99px;padding:1px 8px}}
+ul{{list-style:none;margin:0;padding:0}} li{{padding:8px 0;border-top:1px solid #222;overflow-wrap:anywhere}}
 a{{color:#c6f432;text-decoration:none}} a:hover{{text-decoration:underline}}
 .where{{color:#888;margin-left:8px}} .where:empty{{display:none}}
-.tag{{font-size:12px;background:#2a2a2a;color:#ccc;border-radius:99px;padding:1px 8px;margin-left:8px}}
-</style><main><h1>kite <span>preview</span></h1>
-<p class="sub">What the next run would post · {datetime.datetime.now():%b %d, %I:%M %p} · nothing was posted or marked seen</p>
-{msgs or "<p>No new roles right now.</p>"}</main>"""
+.tag{{font-size:12px;background:#2a2a2a;color:#ccc;border-radius:99px;padding:1px 8px;margin-left:8px;white-space:nowrap}}
+details{{margin-top:14px;color:#999}} summary{{cursor:pointer}} details li{{opacity:.7}}
+.none{{color:#888}}
+</style><main><h1>kite <span>feed</span></h1>
+<p class="sub">Checks every 30 minutes and adds a section with only the roles it hasn't shown yet · this page refreshes itself</p>
+{body or "<p>No runs yet.</p>"}</main>"""
 
 
 def post(payload):
@@ -162,12 +222,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", action="store_true", help="mark current roles seen without posting")
     ap.add_argument("--dry-run", action="store_true", help="print instead of posting")
-    ap.add_argument("--browser", action="store_true", help="show what would be posted in the browser")
+    ap.add_argument("--feed", action="store_true", help="add new roles to the local feed page")
+    ap.add_argument("--open", action="store_true", help="open the feed page in the browser")
     args = ap.parse_args()
-    if args.browser:
-        args.dry_run = True
 
     jobs = load_jobs()
+    if args.feed:
+        new, again = update_feed(jobs)
+        print(f"{len(jobs)} recent listings, {len(new)} new, {len(again)} already shown")
+        if args.open:
+            webbrowser.open("file://" + FEED_PAGE)
+        return
     seen = load_seen()
     now = time.time()
     if seen is None and not args.seed:
@@ -189,24 +254,15 @@ def main():
         args.seed = True
 
     if not args.seed:
-        batches = []
         for kind in KINDS:
             batch = [j for j in new if j["kind"] == kind]
             for i in range(0, len(batch), MAX_PER_MESSAGE):
                 chunk = batch[i:i + MAX_PER_MESSAGE]
-                if args.browser:
-                    batches.append((kind, chunk))
-                elif args.dry_run:
+                if args.dry_run:
                     print(f"\n== {message(chunk, kind)['text']}")
                     print("\n".join(line(j) for j in chunk))
                 else:
                     post(message(chunk, kind))
-        if args.browser:
-            out = os.path.join(os.path.dirname(STATE), "preview.html")
-            with open(out, "w") as f:
-                f.write(page(batches))
-            webbrowser.open("file://" + out)
-            print("opened", out)
 
     if not args.dry_run:
         for k in taken:

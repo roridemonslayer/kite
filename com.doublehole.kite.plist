@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- runs `kite.py --feed` every 30 minutes on this Mac:
+     cp com.doublehole.kite.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/com.doublehole.kite.plist -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.doublehole.kite</string>
+  <key>ProgramArguments</key><array>
+    <string>/Library/Frameworks/Python.framework/Versions/3.12/bin/python3</string>
+    <string>/Users/doublehole/kite/kite.py</string><string>--feed</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/doublehole/kite</string>
+  <key>StartInterval</key><integer>1800</integer>
+  <key>StandardOutPath</key><string>/Users/doublehole/kite/feed.log</string>
+  <key>StandardErrorPath</key><string>/Users/doublehole/kite/feed.log</string>
+</dict></plist>
